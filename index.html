@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>consumed.today</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="cal-header">
+      <span class="logo">consumed.today</span>
+      <span class="cyear" id="calYear"></span>
+      <div class="cal-nav">
+        <button class="cnav" id="prevMonth" type="button" aria-label="Previous month">&#8249;</button>
+        <span class="cmonth" id="calMonth"></span>
+        <button class="cnav" id="nextMonth" type="button" aria-label="Next month">&#8250;</button>
+      </div>
+    </div>
+
+    <div class="month-grid" id="calGrid"></div>
+    <div id="dropdownArea"></div>
+    <div id="fullDetail" class="full-detail" aria-hidden="true"></div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="logs/data.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
