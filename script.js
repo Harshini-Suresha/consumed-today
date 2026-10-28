@@ -28,10 +28,15 @@ const MONTHS = [
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 let logData = {};
-let loggedKeys = new Set();
 let calYear;
 let calMonth;
 let selDay = null;
+const fetchedDates = new Set();
+const loadingDates = new Set();
+
+function hasContent(data) {
+  return CATEGORIES.some((category) => (data?.[category.key] || []).length > 0);
+}
 
 function escHtml(str) {
   return String(str ?? "")
@@ -86,29 +91,54 @@ function todayParts() {
   return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
 }
 
-function latestLoggedParts() {
-  const entries = (Array.isArray(logs) ? logs : [])
-    .map((entry) => parseDateShort(entry.dateShort))
-    .filter(Boolean)
-    .sort((a, b) => dateValue(b) - dateValue(a));
+function isFutureParts(parts) {
+  return dateValue(parts) > dateValue(todayParts());
+}
 
-  return entries[0] || todayParts();
+function isTodayParts(parts) {
+  const today = todayParts();
+  return parts.y === today.y && parts.m === today.m && parts.d === today.d;
 }
 
 function monthValue(year, month) {
   return year * 12 + month;
 }
 
-function maxVisibleMonth() {
-  const latest = latestLoggedParts();
-  return monthValue(latest.y, latest.m);
+function loggedMonths() {
+  return (Array.isArray(logs) ? logs : [])
+    .map((entry) => parseDateShort(entry.dateShort))
+    .filter(Boolean)
+    .map((parts) => monthValue(parts.y, parts.m));
+}
+
+function monthBounds() {
+  const today = todayParts();
+  const current = monthValue(today.y, today.m);
+  const months = loggedMonths();
+  if (!months.length) return { min: current, max: current };
+  return { min: Math.min(...months), max: Math.max(current, ...months) };
 }
 
 function canNavigate(dir) {
   const nextMonth = calMonth + dir;
   const nextYear = calYear + (nextMonth < 1 ? -1 : nextMonth > 12 ? 1 : 0);
   const normalizedMonth = nextMonth < 1 ? 12 : nextMonth > 12 ? 1 : nextMonth;
-  return monthValue(nextYear, normalizedMonth) <= maxVisibleMonth();
+  const target = monthValue(nextYear, normalizedMonth);
+  const { min, max } = monthBounds();
+  return target >= min && target <= max;
+}
+
+function latestContentParts() {
+  const entries = (Array.isArray(logs) ? logs : [])
+    .filter((entry) => {
+      const parts = parseDateShort(entry.dateShort);
+      if (!parts) return false;
+      return CATEGORIES.some((category) => (entry[category.key] || []).length > 0);
+    })
+    .map((entry) => parseDateShort(entry.dateShort))
+    .sort((a, b) => dateValue(b) - dateValue(a));
+
+  return entries[0] || todayParts();
 }
 
 function normalizeItems(key, items) {
@@ -134,7 +164,6 @@ function normalizeItems(key, items) {
 
 function buildLogData(audioByDate) {
   logData = {};
-  loggedKeys = new Set();
 
   for (const entry of Array.isArray(logs) ? logs : []) {
     const parts = parseDateShort(entry.dateShort);
@@ -154,8 +183,42 @@ function buildLogData(audioByDate) {
       audio: normalizeItems("audio", audio),
       video: normalizeItems("video", entry.video || []),
     };
-    loggedKeys.add(key);
   }
+}
+
+function dateShortFromParts(parts) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(parts.d)}/${pad(parts.m)}/${String(parts.y).slice(-2)}`;
+}
+
+function formatDateHuman(parts) {
+  return new Date(parts.y, parts.m - 1, parts.d).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+async function fetchAudioForParts(parts) {
+  const key = dateKeyFromParts(parts);
+  const tracks = await fetchLastfmForDateShort(dateShortFromParts(parts));
+  if (!tracks.length) return false;
+
+  const existing = logData[key] || {
+    date: formatDateHuman(parts),
+    dateShort: dateShortFromParts(parts),
+    physical: [],
+    text: [],
+    audio: [],
+    video: [],
+  };
+
+  logData[key] = {
+    ...existing,
+    audio: normalizeItems("audio", [...(existing.audio || []), ...tracks]),
+  };
+  return true;
 }
 
 async function fetchLastfmForDateShort(dateShort) {
@@ -219,16 +282,30 @@ function calNav(dir) {
 function selectDay(d) {
   const nextDay = selDay === d ? null : d;
   selDay = nextDay;
-  render();
-  if (nextDay) {
-    requestAnimationFrame(() => {
-      document.getElementById("dropdownArea")?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "end",
-      });
-    });
+
+  if (!nextDay) {
+    render();
+    return;
   }
+
+  const parts = { y: calYear, m: calMonth, d: nextDay };
+  const key = dateKeyFromParts(parts);
+  const shouldFetch = !isFutureParts(parts) && !fetchedDates.has(key);
+
+  if (shouldFetch) loadingDates.add(key);
+  render();
+
+  if (!shouldFetch) return;
+
+  fetchAudioForParts(parts).then((changed) => {
+    fetchedDates.add(key);
+    loadingDates.delete(key);
+    if (selDay === nextDay) {
+      render();
+    } else if (changed) {
+      renderCalendar();
+    }
+  });
 }
 
 function displayTitle(item, categoryKey) {
@@ -276,21 +353,6 @@ function renderCategoryItems(data, category) {
   </ul>`;
 }
 
-function renderDayDetail(data) {
-  return `<aside class="day-detail" aria-label="Selected day details">
-    <div class="detail-head">
-      <span>${escHtml(data.date || "Selected day")}</span>
-      <button class="detail-close" type="button" aria-label="Close details" onclick="selectDay(${selDay})">&times;</button>
-    </div>
-    <div class="detail-sections">
-      ${CATEGORIES.map((category) => `<section class="detail-section">
-        <h2>${escHtml(category.label)}</h2>
-        ${renderCategoryItems(data, category)}
-      </section>`).join("")}
-    </div>
-  </aside>`;
-}
-
 function addMonths(year, month, offset) {
   const date = new Date(year, month - 1 + offset, 1);
   return { y: date.getFullYear(), m: date.getMonth() + 1 };
@@ -320,22 +382,20 @@ function renderUpcomingMonths() {
   const area = document.getElementById("dropdownArea");
   const full = document.getElementById("fullDetail");
   if (selDay) {
-    const key = dateKeyFromParts({ y: calYear, m: calMonth, d: selDay });
-    // render a full-page detail view
+    const parts = { y: calYear, m: calMonth, d: selDay };
+    const key = dateKeyFromParts(parts);
+    const data = logData[key] || { date: formatDateHuman(parts) };
     if (full) {
-      full.innerHTML = renderDayFull(logData[key] || {
-        date: `${MONTHS[calMonth - 1]} ${selDay}, ${calYear}`,
-      });
-      full.setAttribute('aria-hidden', 'false');
+      full.innerHTML = renderDayFull(data, loadingDates.has(key));
+      full.setAttribute("aria-hidden", "false");
     }
-    // clear the small-side area
     area.innerHTML = "";
     return;
   }
 
   if (full) {
     full.innerHTML = "";
-    full.setAttribute('aria-hidden', 'true');
+    full.setAttribute("aria-hidden", "true");
   }
 
   const months = [1, 2, 3].map((offset) => addMonths(calYear, calMonth, offset));
@@ -344,22 +404,34 @@ function renderUpcomingMonths() {
   </aside>`;
 }
 
-function renderDayFull(data) {
-  return `<div class="full-head">
-    <h1>${escHtml(data.date || 'Selected day')}</h1>
-    <button class="full-close" type="button" aria-label="Close full details" onclick="selectDay(${selDay})">&times;</button>
-  </div>
-  <div class="full-grid">
-    ${CATEGORIES.map((category) => `<section class="full-section">
+function renderDayFull(data, loading) {
+  const sections = CATEGORIES.filter((category) => (data[category.key] || []).length > 0);
+
+  let body;
+  if (sections.length) {
+    body = sections.map((category) => `<section class="full-section">
       <h2>${escHtml(category.label)}</h2>
       ${renderCategoryItems(data, category)}
-    </section>`).join("")}
-  </div>`;
+    </section>`).join("");
+  } else if (loading) {
+    body = `<p class="full-empty">looking up listening history…</p>`;
+  } else {
+    body = `<p class="full-empty">nothing logged for this day yet.</p>`;
+  }
+
+  return `<div class="full-head">
+    <h1>${escHtml(data.date || "Selected day")}</h1>
+    <button class="full-close" type="button" aria-label="Close full details" onclick="selectDay(${selDay})">&times;</button>
+  </div>
+  <div class="full-grid">${body}</div>`;
 }
 
 function render() {
   document.body.classList.toggle("detail-open", Boolean(selDay));
-  document.getElementById("nextMonth").disabled = !canNavigate(1);
+  const prev = document.getElementById("prevMonth");
+  const next = document.getElementById("nextMonth");
+  if (prev) prev.disabled = !canNavigate(-1);
+  if (next) next.disabled = !canNavigate(1);
   renderCalendar();
   renderUpcomingMonths();
 }
@@ -371,7 +443,6 @@ function renderCalendar() {
 
   const firstDay = new Date(calYear, calMonth - 1, 1).getDay();
   const dim = new Date(calYear, calMonth, 0).getDate();
-  const today = todayParts();
   let html = WEEKDAYS.map((d) => `<div class="dl">${d}</div>`).join("");
 
   for (let i = 0; i < firstDay; i += 1) {
@@ -381,29 +452,40 @@ function renderCalendar() {
   for (let d = 1; d <= dim; d += 1) {
     const parts = { y: calYear, m: calMonth, d };
     const key = dateKeyFromParts(parts);
-    const isToday = calYear === today.y && calMonth === today.m && d === today.d;
-    const isFuture = dateValue(parts) > dateValue(today);
-    const isLogged = loggedKeys.has(key);
+    const isToday = isTodayParts(parts);
+    const isFuture = isFutureParts(parts);
     const isSel = selDay === d;
     const data = logData[key] || {};
     const summary = summarizeDay(data);
+    const hasEntries = hasContent(data);
 
     let cls = "dtile ";
-    if (!isLogged) cls += "empty ";
-    if (isFuture && !isLogged) cls += "future ";
+    if (!hasEntries) cls += "empty ";
+    if (isFuture) cls += "future ";
     if (isToday) cls += "t-today ";
     if (isSel) cls += "t-sel ";
 
-    const dotLabel = summary?.title || data.date || "logged day";
-    const note = isLogged
-      ? `<span class="entry-dots" aria-label="${escHtml(dotLabel)}">
-          <span></span><span></span><span></span><span></span>
+    const dotLabel = summary
+      ? `${summary.title}${summary.more ? ` ${summary.more}` : ""}`
+      : "no entries yet";
+    const dots = hasEntries
+      ? `<span class="entry-dots" aria-hidden="true">
+          ${CATEGORIES
+            .filter((category) => (data[category.key] || []).length > 0)
+            .map((category) => `<span class="dot-${category.key}"></span>`)
+            .join("")}
         </span>`
       : "";
-    const clickable = isLogged || isToday;
+    const preview = summary
+      ? `<span class="entry-note">${escHtml(summary.title)}${summary.more ? ` <b>${escHtml(summary.more)}</b>` : ""}</span>`
+      : "";
+    const clickable = !isFuture;
 
-    html += `<button class="${cls.trim()}" type="button" ${clickable ? `onclick="selectDay(${d})"` : "disabled"}>
-      <span class="dn">${d}</span>${note}
+    html += `<button class="${cls.trim()}" type="button"
+      ${clickable ? `onclick="selectDay(${d})"` : "disabled"}
+      ${hasEntries ? `title="${escHtml(dotLabel)}"` : ""}
+      aria-label="${escHtml(`${MONTHS[calMonth - 1]} ${d}${hasEntries ? ", has entries" : ""}`)}">
+      <span class="dn">${d}</span>${preview}${dots}
     </button>`;
   }
 
@@ -411,7 +493,7 @@ function renderCalendar() {
 }
 
 async function init() {
-  const latest = latestLoggedParts();
+  const latest = latestContentParts();
   calYear = latest.y;
   calMonth = latest.m;
 
@@ -420,17 +502,27 @@ async function init() {
 
   const audioByDate = {};
   await Promise.all((logs || []).map(async (entry) => {
-    if (!entry.dateShort) return;
+    const parts = parseDateShort(entry.dateShort);
+    if (!parts) return;
+    const key = dateKeyFromParts(parts);
     const tracks = await fetchLastfmForDateShort(entry.dateShort);
+    fetchedDates.add(key);
     if (tracks.length > 0) audioByDate[entry.dateShort] = tracks;
   }));
 
+  const liveData = logData;
   buildLogData(audioByDate);
+  for (const [key, data] of Object.entries(liveData)) {
+    if (!logData[key] && hasContent(data)) logData[key] = data;
+  }
   render();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("prevMonth").addEventListener("click", () => calNav(-1));
   document.getElementById("nextMonth").addEventListener("click", () => calNav(1));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && selDay) selectDay(selDay);
+  });
   init();
 });
