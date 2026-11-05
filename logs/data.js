@@ -5,9 +5,6 @@
  *
  * {
  *   date: "tuesday, june 2nd",
- *   physical: [
- *     { name: "rice and dal" },          // no image is fine too
- *   ],
  *   text:  [],
  *   audio: [],
  *   video: [
@@ -28,9 +25,6 @@ const logs = [
   {
     date: "Thursday, November 5th",
     dateShort: "05/11/26",
-    physical: [
-      { name: "rice and dal" },
-    ],
     text:  [],
     audio: [],
     video: [
@@ -40,8 +34,6 @@ const logs = [
   {
     date: "Wednesday, November 4th",
     dateShort: "04/11/26",
-    physical: [
-    ],
     text:  [],
     audio: [],
     video: [],
@@ -49,8 +41,6 @@ const logs = [
   {
     date: "Tuesday, November 3rd",
     dateShort: "03/11/26",
-    physical: [
-    ],
     text:  [],
     audio: [],
     video: [],
@@ -58,8 +48,6 @@ const logs = [
   {
     date: "Monday, November 2nd",
     dateShort: "02/11/26",
-    physical: [
-    ],
     text:  [],
     audio: [],
     video: [],
@@ -67,8 +55,6 @@ const logs = [
   {
     date: "Sunday, November 1st",
     dateShort: "01/11/26",
-    physical: [
-    ],
     text:  [],
     audio: [],
     video: [],

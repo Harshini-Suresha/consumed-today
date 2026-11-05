@@ -4,7 +4,6 @@
  */
 
 const CATEGORIES = [
-  { key: "physical", label: "physical" },
   { key: "video", label: "video" },
   { key: "text", label: "text" },
   { key: "audio", label: "audio" },
@@ -178,7 +177,6 @@ function buildLogData(audioByDate) {
     logData[key] = {
       date: entry.date,
       dateShort: entry.dateShort,
-      physical: normalizeItems("physical", entry.physical || []),
       text: normalizeItems("text", entry.text || []),
       audio: normalizeItems("audio", audio),
       video: normalizeItems("video", entry.video || []),
@@ -208,7 +206,6 @@ async function fetchAudioForParts(parts) {
   const existing = logData[key] || {
     date: formatDateHuman(parts),
     dateShort: dateShortFromParts(parts),
-    physical: [],
     text: [],
     audio: [],
     video: [],
@@ -339,12 +336,12 @@ function itemText(item, categoryKey) {
 
 function renderCategoryItems(data, category) {
   const items = data[category.key] || [];
-  if (!items.length) return `<p class="detail-empty">nothing logged</p>`;
+  if (!items.length) return "";
 
   return `<ul class="detail-list">
     ${items.map((item) => {
       const text = escHtml(itemText(item, category.key));
-      const link = typeof item === "object" && item?.link
+      const link = typeof item === "object" && /^https?:\/\//i.test(String(item?.link || ""))
         ? ` href="${escHtml(item.link)}" target="_blank" rel="noreferrer"`
         : "";
       const tag = link ? "a" : "span";
@@ -416,7 +413,7 @@ function renderDayFull(data, loading) {
   } else if (loading) {
     body = `<p class="full-empty">looking up listening history…</p>`;
   } else {
-    body = `<p class="full-empty">nothing logged for this day yet.</p>`;
+    body = "";
   }
 
   return `<div class="full-head">
